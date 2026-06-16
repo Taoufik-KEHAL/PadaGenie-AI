@@ -1,0 +1,15 @@
+# Environnement virtuel et fichiers Python temporaires
+.venv/
+__pycache__/
+*.py[cod]
+
+# Variables locales et clés API
+.env
+.env.*
+
+# Rapports générés localement
+rapport/
+
+# Fichiers système
+.DS_Store
+Thumbs.db

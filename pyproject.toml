@@ -1,0 +1,21 @@
+[project]
+name = "padagenie-ai"
+version = "0.1.0"
+description = "Générateur intelligent de supports pédagogiques à partir de documents PDF ou TXT"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "streamlit",
+    "pdfplumber",
+    "transformers",
+    "torch",
+    "sentence-transformers",
+    "scikit-learn",
+    "numpy",
+    "openai",
+    "google-generativeai",
+    "groq",
+]
+
+[tool.uv]
+package = false
