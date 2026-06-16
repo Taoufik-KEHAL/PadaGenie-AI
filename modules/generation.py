@@ -116,17 +116,8 @@ def _preparer_texte(texte):
 
 
 def _est_modele_local(configuration_modele):
-    """Indique si le moteur choisi est le modèle local Hugging Face."""
-    return (configuration_modele or {}).get("type_modele") == "Modèle local Hugging Face"
-
-
-def _mode_local_fiable(configuration_modele):
-    """Active le générateur pédagogique extractif pour les modèles locaux faibles."""
-    if not _est_modele_local(configuration_modele):
-        return False
-
-    mode_local = (configuration_modele or {}).get("mode_local", "")
-    return mode_local != "Essai du modèle Hugging Face"
+    """Indique si le moteur choisi est le modèle local Ollama."""
+    return (configuration_modele or {}).get("type_modele") == "Ollama local"
 
 
 def _normaliser_mot(mot):
@@ -488,7 +479,7 @@ def _corriger_sortie_locale(contenu, texte, type_contenu, configuration_modele):
     if not _est_modele_local(configuration_modele):
         return contenu
 
-    if _mode_local_fiable(configuration_modele) or _sortie_trop_faible(contenu, type_contenu):
+    if _sortie_trop_faible(contenu, type_contenu):
         return _generer_contenu_fiable(texte, type_contenu)
 
     return contenu
@@ -499,9 +490,6 @@ def generer_resume(texte, configuration_modele):
     texte_utilisable, erreur = _preparer_texte(texte)
     if erreur:
         return erreur
-
-    if _mode_local_fiable(configuration_modele):
-        return _generer_contenu_fiable(texte_utilisable, "resume")
 
     prompt = f"""
 Génère un résumé clair, structuré et compréhensible en français du document suivant.
@@ -524,9 +512,6 @@ def generer_quiz(texte, configuration_modele):
     texte_utilisable, erreur = _preparer_texte(texte)
     if erreur:
         return erreur
-
-    if _mode_local_fiable(configuration_modele):
-        return _generer_contenu_fiable(texte_utilisable, "quiz")
 
     prompt = f"""
 À partir du document suivant, génère un quiz de révision en français.
@@ -555,9 +540,6 @@ def generer_flashcards(texte, configuration_modele):
     if erreur:
         return erreur
 
-    if _mode_local_fiable(configuration_modele):
-        return _generer_contenu_fiable(texte_utilisable, "flashcards")
-
     prompt = f"""
 À partir du document suivant, génère au moins 5 flashcards en français.
 Chaque flashcard doit contenir une question et une réponse courte, claire et utile pour la révision.
@@ -579,9 +561,6 @@ def generer_questions_examen(texte, configuration_modele):
     texte_utilisable, erreur = _preparer_texte(texte)
     if erreur:
         return erreur
-
-    if _mode_local_fiable(configuration_modele):
-        return _generer_contenu_fiable(texte_utilisable, "examen")
 
     prompt = f"""
 À partir du document suivant, génère au moins 5 questions ouvertes de type examen en français.

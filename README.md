@@ -20,7 +20,7 @@ Le projet propose un pipeline IA simple et compréhensible pour un projet de fin
 - Upload de fichiers PDF ou TXT.
 - Aperçu du texte extrait.
 - Choix dynamique du moteur IA.
-- Mode local fiable sans clé API pour produire des supports structurés même avec un petit modèle local.
+- Mode local avec Ollama sans clé API.
 - Génération de supports pédagogiques en français.
 - Conservation des résultats avec `st.session_state`.
 - Score de qualité entre 0 et 1.
@@ -63,24 +63,26 @@ Remarque : le dossier `rapport/` contient les livrables académiques générés 
 - Python 3.10 ou version supérieure
 - Streamlit pour l'interface utilisateur
 - pdfplumber pour l'extraction de texte PDF
-- transformers et torch pour les modèles locaux Hugging Face
 - OpenAI API pour la génération via modèle externe
-- Google Gemini API pour la génération via modèle externe
 - Groq API pour la génération rapide via modèle externe
+- Ollama pour la génération locale sans clé API
 - Sentence-Transformers pour les embeddings
 - scikit-learn pour la similarité cosinus
 - uv pour la gestion des dépendances
 
 ## 6. Choix du modèle IA
 
-L'utilisateur peut choisir entre quatre moteurs de génération :
+L'utilisateur peut choisir entre trois moteurs de génération :
 
-- Modèle local Hugging Face : `google/flan-t5-small` ou `google/flan-t5-base`.
 - OpenAI API : `gpt-4o-mini` ou `gpt-4.1-mini`.
-- Google Gemini API : `gemini-1.5-flash` ou `gemini-1.5-pro`.
 - Groq API : `llama-3.3-70b-versatile`, `llama-3.1-8b-instant`, `openai/gpt-oss-120b` ou `openai/gpt-oss-20b`.
+- Ollama local : `llama3.2`, `llama3.1`, `mistral`, `qwen2.5`, `gemma2` ou un modèle personnalisé installé localement.
 
-Pour rendre la démonstration utilisable sans clé API, le mode local propose un mode fiable sans API. Ce mode exploite directement le document source pour construire un résumé, des QCM, des flashcards et des questions d'examen structurés. L'utilisateur peut aussi lancer un essai direct du modèle Hugging Face.
+Pour utiliser Ollama localement, il faut installer Ollama, lancer le service local, puis installer un modèle, par exemple :
+
+```bash
+ollama pull llama3.2
+```
 
 Les clés API sont saisies dans des champs sécurisés et ne sont jamais stockées dans le code, dans un fichier ou affichées dans l'interface.
 
@@ -132,7 +134,7 @@ La génération utilise des prompts en français. Chaque fonction construit une 
 - flashcards question-réponse ;
 - questions ouvertes de type examen.
 
-Ces prompts sont envoyés au moteur choisi par l'utilisateur : modèle local Hugging Face, OpenAI API, Google Gemini API ou Groq API.
+Ces prompts sont envoyés au moteur choisi par l'utilisateur : OpenAI API, Groq API ou Ollama local.
 
 ## 12. Explication de l'évaluation qualité
 
@@ -146,7 +148,7 @@ Ce score indique si le contenu généré reste sémantiquement lié au document 
 
 ## 13. Limites du projet
 
-- Les modèles locaux légers peuvent produire des réponses moins détaillées que les grands modèles via API.
+- Les modèles Ollama locaux peuvent produire des réponses moins détaillées que les grands modèles via API selon le modèle installé.
 - L'évaluation par similarité cosinus mesure la proximité sémantique, mais ne garantit pas l'exactitude pédagogique complète.
 - Les documents PDF scannés sous forme d'image peuvent nécessiter une étape OCR non incluse.
 - Les très longs documents sont limités afin d'éviter les erreurs de contexte des modèles.

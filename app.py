@@ -937,36 +937,15 @@ with st.sidebar:
     type_modele = st.selectbox(
         "Type de modèle",
         [
-            "Modèle local Hugging Face",
             "OpenAI API",
-            "Google Gemini API",
             "Groq API",
+            "Ollama local",
         ],
     )
 
     cle_api = ""
-    mode_local = ""
-    if type_modele == "Modèle local Hugging Face":
-        nom_modele = st.selectbox(
-            "Modèle Hugging Face",
-            [
-                "google/flan-t5-small",
-                "google/flan-t5-base",
-            ],
-        )
-        mode_local = st.selectbox(
-            "Mode de génération locale",
-            [
-                "Mode fiable sans API",
-                "Essai du modèle Hugging Face",
-            ],
-        )
-        st.caption("Aucune clé API n'est nécessaire pour ce mode.")
-        st.caption(
-            "Le mode fiable utilise le document source pour produire des supports "
-            "structurés, même si le petit modèle local répond mal."
-        )
-    elif type_modele == "OpenAI API":
+    url_ollama = ""
+    if type_modele == "OpenAI API":
         cle_api = st.text_input("Entrez votre clé API OpenAI", type="password")
         nom_modele = st.selectbox(
             "Modèle OpenAI",
@@ -975,16 +954,7 @@ with st.sidebar:
                 "gpt-4.1-mini",
             ],
         )
-    elif type_modele == "Google Gemini API":
-        cle_api = st.text_input("Entrez votre clé API Gemini", type="password")
-        nom_modele = st.selectbox(
-            "Modèle Gemini",
-            [
-                "gemini-1.5-flash",
-                "gemini-1.5-pro",
-            ],
-        )
-    else:
+    elif type_modele == "Groq API":
         cle_api = st.text_input("Entrez votre clé API Groq", type="password")
         nom_modele = st.selectbox(
             "Modèle Groq",
@@ -995,12 +965,38 @@ with st.sidebar:
                 "openai/gpt-oss-20b",
             ],
         )
+    else:
+        nom_modele = st.selectbox(
+            "Modèle Ollama",
+            [
+                "llama3.2",
+                "llama3.1",
+                "mistral",
+                "qwen2.5",
+                "gemma2",
+            ],
+        )
+        modele_personnalise = st.text_input(
+            "Modèle Ollama personnalisé",
+            placeholder="Exemple : llama3.2:3b",
+        )
+        if modele_personnalise.strip():
+            nom_modele = modele_personnalise.strip()
+        url_ollama = st.text_input(
+            "URL du serveur Ollama",
+            value="http://localhost:11434",
+        )
+        st.caption("Aucune clé API n'est nécessaire pour Ollama local.")
+        st.caption(
+            "Avant d'utiliser un modèle, installez-le par exemple avec "
+            "`ollama pull llama3.2` et lancez Ollama."
+        )
 
 configuration_modele = {
     "type_modele": type_modele,
     "nom_modele": nom_modele,
     "cle_api": cle_api,
-    "mode_local": mode_local,
+    "url_ollama": url_ollama,
 }
 
 fichier = st.file_uploader(
