@@ -482,6 +482,30 @@ def configuration_generation_disponible(configuration_modele):
     return type_modele == "Ollama local" and bool(configuration_modele.get("nom_modele"))
 
 
+def message_cle_api_manquante(configuration_modele):
+    """Retourne le message d'erreur si une clé API obligatoire manque."""
+    type_modele = configuration_modele.get("type_modele")
+    cle_api = configuration_modele.get("cle_api", "").strip()
+
+    if type_modele == "OpenAI API" and not cle_api:
+        return "Veuillez renseigner votre clé API OpenAI pour générer les supports."
+
+    if type_modele == "Groq API" and not cle_api:
+        return "Veuillez renseigner votre clé API Groq pour générer les supports."
+
+    return ""
+
+
+def generation_autorisee(configuration_modele):
+    """Affiche une erreur uniquement si la clé API obligatoire n'est pas renseignée."""
+    message = message_cle_api_manquante(configuration_modele)
+    if message:
+        st.error(message)
+        return False
+
+    return True
+
+
 def signature_resume_automatique(configuration_modele, niveau):
     """Construit une signature pour éviter les régénérations inutiles du résumé."""
     texte = st.session_state.get("texte_nettoye") or st.session_state.get("texte_extrait", "")
@@ -1475,6 +1499,10 @@ configuration_modele = {
     "url_ollama": url_ollama,
 }
 
+message_cle_api = message_cle_api_manquante(configuration_modele)
+if message_cle_api:
+    st.sidebar.error(message_cle_api)
+
 fichier = st.file_uploader(
     "Importer un document de cours au format PDF ou TXT",
     type=["pdf", "txt"],
@@ -1507,7 +1535,7 @@ if texte_extrait:
         st.info("L'index FAISS n'est pas encore disponible pour ce document.")
 
     if st.button("Générer tous les supports pédagogiques", type="primary"):
-        if texte_source_disponible():
+        if texte_source_disponible() and generation_autorisee(configuration_modele):
             try:
                 with st.spinner("Génération de tous les supports en cours..."):
                     st.session_state["resume"] = generer_support_pedagogique(
@@ -1569,7 +1597,7 @@ with onglet_quiz:
     colonne_generer, colonne_exporter, _ = st.columns([1.55, 1.75, 2.2])
     with colonne_generer:
         if st.button("Générer le quiz", key="bouton_quiz"):
-            if texte_source_disponible():
+            if texte_source_disponible() and generation_autorisee(configuration_modele):
                 try:
                     with st.spinner("Génération du quiz en cours..."):
                         st.session_state["quiz"] = generer_support_pedagogique(
@@ -1590,7 +1618,7 @@ with onglet_flashcards:
     colonne_generer, colonne_exporter, _ = st.columns([1.55, 1.75, 2.2])
     with colonne_generer:
         if st.button("Générer les flashcards", key="bouton_flashcards"):
-            if texte_source_disponible():
+            if texte_source_disponible() and generation_autorisee(configuration_modele):
                 try:
                     with st.spinner("Génération des flashcards en cours..."):
                         st.session_state["flashcards"] = generer_support_pedagogique(
@@ -1611,7 +1639,7 @@ with onglet_examen:
     colonne_generer, colonne_exporter, _ = st.columns([1.55, 1.75, 2.2])
     with colonne_generer:
         if st.button("Générer les questions d'examen", key="bouton_examen"):
-            if texte_source_disponible():
+            if texte_source_disponible() and generation_autorisee(configuration_modele):
                 try:
                     with st.spinner("Génération des questions d'examen en cours..."):
                         st.session_state["questions_examen"] = generer_support_pedagogique(
