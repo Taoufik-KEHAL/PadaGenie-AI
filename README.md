@@ -1,10 +1,10 @@
 # PadaGenie AI
 
-PadaGenie AI est une application Streamlit modulaire qui génère automatiquement des supports pédagogiques à partir d'un document de cours au format PDF ou TXT.
+PadaGenie AI est une application Streamlit modulaire qui génère automatiquement des supports pédagogiques en français à partir d'un document de cours PDF ou TXT.
 
 ## 1. Présentation du projet
 
-Le projet propose un pipeline IA simple et compréhensible pour un projet de fin de module en intelligence artificielle avancée. L'application extrait le texte d'un document, nettoie le contenu, génère des supports pédagogiques, puis évalue la qualité sémantique des résultats.
+Le projet propose un pipeline IA pédagogique : extraction du texte, nettoyage, indexation RAG, génération de contenus, évaluation sémantique et export PDF des résultats.
 
 ## 2. Objectifs
 
@@ -13,7 +13,9 @@ Le projet propose un pipeline IA simple et compréhensible pour un projet de fin
 - Générer un quiz sous forme de QCM.
 - Générer des flashcards de révision.
 - Générer des questions ouvertes de type examen.
-- Évaluer la qualité des contenus générés avec une approche Deep Learning.
+- Adapter les résultats au niveau de difficulté choisi.
+- Évaluer la qualité des contenus générés.
+- Exporter les résultats au format PDF.
 
 ## 3. Fonctionnalités
 
@@ -21,17 +23,11 @@ Le projet propose un pipeline IA simple et compréhensible pour un projet de fin
 - Aperçu du texte extrait.
 - Choix dynamique du moteur IA.
 - Mode local avec Ollama sans clé API.
+- Architecture RAG avec Sentence-BERT et FAISS.
+- Choix du niveau de difficulté : débutant, intermédiaire ou avancé.
 - Génération de supports pédagogiques en français.
-- Conservation des résultats avec `st.session_state`.
 - Score de qualité entre 0 et 1.
-
-Exemple de sortie attendue pour une flashcard :
-
-```text
-Flashcard 1
-Question : Qu'est-ce qu'un embedding sémantique ?
-Réponse : C'est une représentation vectorielle qui encode le sens d'un texte.
-```
+- Téléchargement des résultats générés en PDF.
 
 ## 4. Architecture modulaire
 
@@ -44,33 +40,68 @@ PadaGenie-AI/
 │   ├── __init__.py
 │   ├── extraction.py
 │   ├── nettoyage.py
+│   ├── rag.py
+│   ├── export_pdf.py
 │   ├── modeles.py
 │   ├── generation.py
 │   └── evaluation.py
 └── rapport/
-    ├── rapport_scientifique.md
-    ├── diagrammes_uml.md
-    ├── diagrammes_uml_padaGenie_ai.pdf
-    └── generer_pdf_uml.py
+    └── rapport_scientifique.md
 ```
 
-Le fichier `app.py` gère uniquement l'interface Streamlit. La logique métier est séparée dans les modules Python.
+Le fichier `app.py` gère l'interface Streamlit. La logique métier est séparée dans les modules Python.
 
-Remarque : le dossier `rapport/` contient les livrables académiques générés localement. Il est ignoré par Git dans ce dépôt.
+## 5. Architecture RAG
 
-## 5. Technologies utilisées
+PadaGenie AI utilise une approche RAG, Retrieval-Augmented Generation, afin de ne pas envoyer tout le document directement au modèle génératif.
+
+Le pipeline RAG suit les étapes suivantes :
+
+1. extraction du texte ;
+2. nettoyage ;
+3. découpage en chunks ;
+4. création d'embeddings avec Sentence-BERT ;
+5. indexation vectorielle avec FAISS ;
+6. récupération des passages pertinents selon la tâche ;
+7. génération du contenu pédagogique à partir du contexte récupéré.
+
+Cette approche aide le modèle à rester lié au document source et réduit le risque de réponses hors contexte.
+
+## 6. Choix du niveau de difficulté
+
+L'utilisateur peut choisir le niveau pédagogique dans la sidebar :
+
+- Débutant : vocabulaire accessible, définitions claires et questions faciles.
+- Intermédiaire : contenu équilibré, compréhension et vocabulaire académique simple.
+- Avancé : contenu plus approfondi, analyse et vocabulaire plus technique.
+
+Le niveau choisi est transmis aux fonctions de génération et influence directement les prompts.
+
+## 7. Export PDF
+
+Après la génération d'au moins un contenu, l'utilisateur peut télécharger un fichier `resultats_padagenie_ai.pdf`.
+
+Le PDF contient :
+
+- le titre du projet ;
+- le résumé généré ;
+- le quiz généré ;
+- les flashcards générées ;
+- les questions d'examen générées.
+
+## 8. Technologies utilisées
 
 - Python 3.10 ou version supérieure
 - Streamlit pour l'interface utilisateur
 - pdfplumber pour l'extraction de texte PDF
-- OpenAI API pour la génération via modèle externe
-- Groq API pour la génération rapide via modèle externe
-- Ollama pour la génération locale sans clé API
 - Sentence-Transformers pour les embeddings
+- FAISS pour l'indexation vectorielle
 - scikit-learn pour la similarité cosinus
+- OpenAI API, Groq API ou Ollama local pour la génération
+- fpdf2 pour l'export PDF
 - uv pour la gestion des dépendances
 
-## 6. Choix du modèle IA
+## 9. Choix du modèle IA
 
 L'utilisateur peut choisir entre trois moteurs de génération :
 
@@ -78,32 +109,18 @@ L'utilisateur peut choisir entre trois moteurs de génération :
 - Groq API : `llama-3.3-70b-versatile`, `llama-3.1-8b-instant`, `openai/gpt-oss-120b` ou `openai/gpt-oss-20b`.
 - Ollama local : `llama3.2`, `llama3.1`, `mistral`, `qwen2.5`, `gemma2` ou un modèle personnalisé installé localement.
 
-Pour utiliser Ollama localement, il faut installer Ollama, lancer le service local, puis installer un modèle, par exemple :
+Pour utiliser Ollama localement :
 
 ```bash
 ollama pull llama3.2
+ollama serve
 ```
 
-Les clés API sont saisies dans des champs sécurisés et ne sont jamais stockées dans le code, dans un fichier ou affichées dans l'interface.
+Les clés API sont saisies dans des champs sécurisés. Elles ne sont jamais stockées dans le code, dans un fichier ou affichées dans l'interface.
 
-## 7. Gestion des dépendances avec uv
+## 10. Gestion des dépendances avec uv
 
-Le projet utilise `uv` comme gestionnaire moderne de dépendances Python. Il permet :
-
-- de créer et gérer l'environnement virtuel ;
-- d'installer les dépendances ;
-- de gérer le projet à partir du fichier `pyproject.toml` ;
-- de lancer l'application sans activer manuellement l'environnement virtuel.
-
-Ce projet utilise `pyproject.toml` au lieu de `requirements.txt` comme solution principale de gestion des dépendances.
-
-## 8. Installation
-
-Installer `uv` si nécessaire :
-
-```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-```
+Le projet utilise `uv` comme gestionnaire moderne de dépendances Python. Il permet de créer l'environnement virtuel, d'installer les dépendances et de lancer l'application à partir du fichier `pyproject.toml`.
 
 Installer les dépendances :
 
@@ -111,44 +128,23 @@ Installer les dépendances :
 uv sync
 ```
 
-## 9. Lancement de l'application
-
-Lancer l'application avec :
+Lancer l'application :
 
 ```bash
 uv run streamlit run app.py
 ```
 
-## 10. Explication de la partie Deep Learning
+## 11. Évaluation qualité
 
-La partie Deep Learning repose sur Sentence-BERT, un modèle capable de transformer un texte en vecteur numérique appelé embedding sémantique. Deux textes qui parlent du même sujet auront des vecteurs proches dans l'espace vectoriel.
+Le module `evaluation.py` calcule un score entre 0 et 1 en comparant le document source et les contenus générés avec des embeddings Sentence-BERT et la similarité cosinus.
 
-Dans PadaGenie AI, le document source et les contenus générés sont transformés en embeddings. La similarité cosinus mesure ensuite leur proximité sémantique.
+- Score supérieur ou égal à 0.75 : bonne qualité.
+- Score entre 0.50 et 0.75 : qualité moyenne.
+- Score inférieur à 0.50 : qualité faible.
 
-## 11. Explication de la partie IA générative
+## 12. Limites du projet
 
-La génération utilise des prompts en français. Chaque fonction construit une consigne adaptée :
-
-- résumé clair et structuré ;
-- quiz QCM avec quatre propositions ;
-- flashcards question-réponse ;
-- questions ouvertes de type examen.
-
-Ces prompts sont envoyés au moteur choisi par l'utilisateur : OpenAI API, Groq API ou Ollama local.
-
-## 12. Explication de l'évaluation qualité
-
-Le module `evaluation.py` calcule un score entre 0 et 1 :
-
-- score supérieur ou égal à 0.75 : bonne qualité ;
-- score entre 0.50 et 0.75 : qualité moyenne ;
-- score inférieur à 0.50 : qualité faible.
-
-Ce score indique si le contenu généré reste sémantiquement lié au document original.
-
-## 13. Limites du projet
-
-- Les modèles Ollama locaux peuvent produire des réponses moins détaillées que les grands modèles via API selon le modèle installé.
-- L'évaluation par similarité cosinus mesure la proximité sémantique, mais ne garantit pas l'exactitude pédagogique complète.
-- Les documents PDF scannés sous forme d'image peuvent nécessiter une étape OCR non incluse.
-- Les très longs documents sont limités afin d'éviter les erreurs de contexte des modèles.
+- Les modèles locaux Ollama peuvent produire des réponses moins détaillées que les grands modèles via API.
+- L'évaluation sémantique ne garantit pas l'exactitude pédagogique complète.
+- Les PDF scannés sous forme d'image peuvent nécessiter une étape OCR non incluse.
+- La qualité dépend du modèle choisi, de la structure du document et de la qualité de l'extraction.

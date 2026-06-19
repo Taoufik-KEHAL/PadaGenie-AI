@@ -7,6 +7,7 @@ from html import escape
 import streamlit as st
 
 from modules.evaluation import evaluer_qualite, interpreter_score
+from modules.export_pdf import generer_pdf_resultats
 from modules.extraction import extraire_texte
 from modules.generation import (
     generer_flashcards,
@@ -15,6 +16,22 @@ from modules.generation import (
     generer_resume,
 )
 from modules.nettoyage import limiter_texte, nettoyer_texte
+from modules.rag import (
+    charger_modele_embedding_rag,
+    construire_contexte_rag,
+    construire_index_faiss,
+    creer_embeddings_chunks,
+    decouper_en_chunks,
+    rechercher_chunks_pertinents,
+)
+
+
+REQUETES_RAG = {
+    "resume": "Identifier les idées principales, définitions importantes et concepts centraux du document.",
+    "quiz": "Identifier les notions importantes pouvant être transformées en questions à choix multiples.",
+    "flashcards": "Identifier les définitions, concepts clés, termes importants et relations entre notions.",
+    "examen": "Identifier les parties du cours permettant de créer des questions ouvertes d'évaluation.",
+}
 
 
 st.set_page_config(
@@ -115,6 +132,35 @@ st.markdown(
         margin-top: 0.45rem;
         color: rgba(255, 255, 255, 0.78);
         line-height: 1.45;
+    }
+
+    .quiz-feedback {
+        border-radius: 8px;
+        padding: 0.85rem 1rem;
+        margin-top: 0.85rem;
+        line-height: 1.55;
+    }
+
+    .quiz-feedback-error {
+        border: 1px solid rgba(239, 68, 68, 0.22);
+        background: rgba(254, 226, 226, 0.95);
+        color: #b91c1c;
+    }
+
+    .quiz-feedback-success {
+        border: 1px solid rgba(34, 197, 94, 0.26);
+        background: rgba(220, 252, 231, 0.96);
+        color: #166534;
+    }
+
+    .quiz-feedback-info {
+        border: 1px solid rgba(59, 130, 246, 0.22);
+        background: rgba(219, 234, 254, 0.96);
+        color: #1d4ed8;
+    }
+
+    .quiz-feedback-title {
+        font-weight: 800;
     }
 
     .flashcard-viewer {
@@ -279,6 +325,10 @@ def initialiser_session():
     valeurs_defaut = {
         "nom_fichier": "",
         "texte_extrait": "",
+        "texte_nettoye": "",
+        "chunks": [],
+        "modele_embedding_rag": None,
+        "index_faiss": None,
         "resume": "",
         "quiz": "",
         "flashcards": "",
@@ -303,7 +353,7 @@ def initialiser_session():
 
 def texte_source_disponible():
     """Vérifie si un texte source exploitable est présent en session."""
-    texte = st.session_state.get("texte_extrait", "")
+    texte = st.session_state.get("texte_nettoye") or st.session_state.get("texte_extrait", "")
     if not texte.strip():
         st.warning("Veuillez d'abord importer un fichier PDF ou TXT contenant du texte.")
         return False
@@ -313,6 +363,104 @@ def texte_source_disponible():
         return False
 
     return True
+
+
+def reinitialiser_resultats_generation():
+    """Efface les contenus générés quand un nouveau document est chargé."""
+    st.session_state["resume"] = ""
+    st.session_state["quiz"] = ""
+    st.session_state["flashcards"] = ""
+    st.session_state["questions_examen"] = ""
+    st.session_state["score_qualite"] = None
+    reinitialiser_quiz_interactif()
+    reinitialiser_flashcards()
+    reinitialiser_questions_examen()
+
+
+def indexer_document_rag(texte):
+    """Crée les chunks, embeddings et l'index FAISS pour le document courant."""
+    chunks = decouper_en_chunks(texte)
+    if not chunks:
+        raise ValueError("Aucun chunk RAG n'a pu être créé à partir du document.")
+
+    modele_embedding = charger_modele_embedding_rag()
+    embeddings = creer_embeddings_chunks(chunks)
+    index_faiss = construire_index_faiss(embeddings)
+
+    st.session_state["chunks"] = chunks
+    st.session_state["modele_embedding_rag"] = modele_embedding
+    st.session_state["index_faiss"] = index_faiss
+
+
+def contexte_rag_pour_tache(type_support):
+    """Construit le contexte RAG adapté au support demandé."""
+    chunks = st.session_state.get("chunks", [])
+    index_faiss = st.session_state.get("index_faiss")
+    modele_embedding = st.session_state.get("modele_embedding_rag")
+
+    if not chunks or index_faiss is None or modele_embedding is None:
+        st.warning(
+            "L'index RAG n'est pas disponible. La génération utilisera le texte nettoyé."
+        )
+        return None
+
+    chunks_pertinents = rechercher_chunks_pertinents(
+        REQUETES_RAG[type_support],
+        chunks,
+        index_faiss,
+        modele_embedding,
+        top_k=5,
+    )
+    return construire_contexte_rag(chunks_pertinents)
+
+
+def generer_support_pedagogique(type_support, fonction_generation, configuration_modele, niveau):
+    """Génère un support en utilisant le contexte RAG de la tâche."""
+    texte_nettoye = st.session_state.get("texte_nettoye") or st.session_state["texte_extrait"]
+    contexte_rag = contexte_rag_pour_tache(type_support)
+    return fonction_generation(
+        texte=texte_nettoye,
+        configuration_modele=configuration_modele,
+        contexte_rag=contexte_rag,
+        niveau_difficulte=niveau,
+    )
+
+
+def contenu_exportable_disponible():
+    """Indique si au moins un résultat peut être exporté."""
+    champs = ["resume", "quiz", "flashcards", "questions_examen"]
+    return any(st.session_state.get(champ, "").strip() for champ in champs)
+
+
+def afficher_export_pdf(cle_suffixe="principal"):
+    """Affiche uniquement le bouton d'export PDF."""
+    if not contenu_exportable_disponible():
+        st.download_button(
+            label="Exporter les résultats en PDF",
+            data=b"",
+            file_name="resultats_padagenie_ai.pdf",
+            mime="application/pdf",
+            disabled=True,
+            key=f"bouton_export_pdf_desactive_{cle_suffixe}",
+        )
+        return
+
+    try:
+        pdf_bytes = generer_pdf_resultats(
+            resume=st.session_state["resume"],
+            quiz=st.session_state["quiz"],
+            flashcards=st.session_state["flashcards"],
+            questions_examen=st.session_state["questions_examen"],
+        )
+        st.download_button(
+            label="Exporter les résultats en PDF",
+            data=pdf_bytes,
+            file_name="resultats_padagenie_ai.pdf",
+            mime="application/pdf",
+            key=f"bouton_export_pdf_{cle_suffixe}",
+        )
+    except Exception as erreur:
+        st.error(f"Erreur pendant la génération du PDF : {erreur}")
 
 
 def afficher_contenu(titre, contenu):
@@ -362,6 +510,28 @@ def _normaliser_quiz(contenu):
     return contenu.strip()
 
 
+def _nettoyer_option_quiz(texte):
+    """Retire les fragments de correction collés accidentellement à une option."""
+    texte = re.split(
+        r"\s+(?:Réponse correcte|Explication)\s*:",
+        str(texte),
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0]
+    texte = re.sub(r"\s+", " ", texte)
+    return texte.strip(" -\n\t")
+
+
+def _libelle_bonne_reponse(options, reponse):
+    """Construit un libellé propre pour la réponse correcte."""
+    for etiquette, valeur in options:
+        if etiquette == reponse:
+            valeur = _nettoyer_option_quiz(valeur)
+            return f"{etiquette}. {valeur}" if valeur else etiquette
+
+    return reponse
+
+
 def _analyser_quiz(contenu):
     """Transforme le texte du quiz en questions structurées pour l'affichage."""
     contenu = _normaliser_quiz(contenu)
@@ -399,7 +569,7 @@ def _analyser_quiz(contenu):
             bloc,
         )
         options = [
-            (etiquette, re.sub(r"\s+", " ", valeur).strip())
+            (etiquette, _nettoyer_option_quiz(valeur))
             for etiquette, valeur in options
         ]
 
@@ -464,12 +634,8 @@ def afficher_quiz(contenu):
 
         with st.expander("Afficher le corrigé complet"):
             for position, item in enumerate(questions, start=1):
-                bonne_option = next(
-                    (
-                        f"{etiquette}. {valeur}"
-                        for etiquette, valeur in item["options"]
-                        if etiquette == item["reponse"]
-                    ),
+                bonne_option = _libelle_bonne_reponse(
+                    item["options"],
                     item["reponse"],
                 )
                 st.markdown(f"**{position}. {item['question']}**")
@@ -557,13 +723,39 @@ def afficher_quiz(contenu):
     if st.session_state["quiz_valide"]:
         choix_valide = st.session_state["quiz_reponses"].get(cle_question)
         if choix_valide == question["reponse"]:
-            st.success("Bonne réponse.")
+            st.markdown(
+                (
+                    '<div class="quiz-feedback quiz-feedback-success">'
+                    '<span class="quiz-feedback-title">Bonne réponse.</span>'
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
         else:
-            bonne_option = libelles_options.get(question["reponse"], question["reponse"])
-            st.error(f"Réponse incorrecte. Bonne réponse : {bonne_option}")
+            bonne_option = _libelle_bonne_reponse(
+                question["options"],
+                question["reponse"],
+            )
+            st.markdown(
+                (
+                    '<div class="quiz-feedback quiz-feedback-error">'
+                    '<span class="quiz-feedback-title">Réponse incorrecte.</span><br>'
+                    f'Bonne réponse : {escape(bonne_option)}'
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
 
         if question["explication"]:
-            st.info(f"Explication : {question['explication']}")
+            st.markdown(
+                (
+                    '<div class="quiz-feedback quiz-feedback-info">'
+                    '<span class="quiz-feedback-title">Explication</span><br>'
+                    f'{escape(question["explication"])}'
+                    "</div>"
+                ),
+                unsafe_allow_html=True,
+            )
 
     if st.button("Recommencer le quiz", key=f"quiz_reset_{signature}"):
         reinitialiser_quiz_interactif()
@@ -571,12 +763,8 @@ def afficher_quiz(contenu):
 
     with st.expander("Afficher le corrigé complet"):
         for position, item in enumerate(questions, start=1):
-            bonne_option = next(
-                (
-                    f"{etiquette}. {valeur}"
-                    for etiquette, valeur in item["options"]
-                    if etiquette == item["reponse"]
-                ),
+            bonne_option = _libelle_bonne_reponse(
+                item["options"],
                 item["reponse"],
             )
             st.markdown(f"**{position}. {item['question']}**")
@@ -976,21 +1164,13 @@ with st.sidebar:
                 "gemma2",
             ],
         )
-        modele_personnalise = st.text_input(
-            "Modèle Ollama personnalisé",
-            placeholder="Exemple : llama3.2:3b",
-        )
-        if modele_personnalise.strip():
-            nom_modele = modele_personnalise.strip()
-        url_ollama = st.text_input(
-            "URL du serveur Ollama",
-            value="http://localhost:11434",
-        )
-        st.caption("Aucune clé API n'est nécessaire pour Ollama local.")
-        st.caption(
-            "Avant d'utiliser un modèle, installez-le par exemple avec "
-            "`ollama pull llama3.2` et lancez Ollama."
-        )
+
+    st.sidebar.subheader("Paramètres pédagogiques")
+    niveau_difficulte = st.sidebar.selectbox(
+        "Choisissez le niveau de difficulté",
+        ["Débutant", "Intermédiaire", "Avancé"],
+        index=1,
+    )
 
 configuration_modele = {
     "type_modele": type_modele,
@@ -1012,15 +1192,18 @@ if fichier is not None:
 
             st.session_state["nom_fichier"] = fichier.name
             st.session_state["texte_extrait"] = texte_nettoye
-            st.session_state["resume"] = ""
-            st.session_state["quiz"] = ""
-            st.session_state["flashcards"] = ""
-            st.session_state["questions_examen"] = ""
-            st.session_state["score_qualite"] = None
+            st.session_state["texte_nettoye"] = texte_nettoye
+            st.session_state["chunks"] = []
+            st.session_state["modele_embedding_rag"] = None
+            st.session_state["index_faiss"] = None
+            reinitialiser_resultats_generation()
+
+            with st.spinner("Indexation RAG du document en cours..."):
+                indexer_document_rag(texte_nettoye)
 
         st.success("Texte extrait avec succès.")
     except Exception as erreur:
-        st.error(f"Erreur pendant l'extraction : {erreur}")
+        st.error(f"Erreur pendant l'extraction ou l'indexation RAG : {erreur}")
 else:
     st.info("Importez un fichier PDF ou TXT pour commencer.")
 
@@ -1034,26 +1217,41 @@ if texte_extrait:
         disabled=True,
     )
 
+    st.subheader("Indexation RAG du document")
+    nombre_chunks = len(st.session_state.get("chunks", []))
+    st.write(f"Nombre de chunks créés : {nombre_chunks}")
+    if st.session_state.get("index_faiss") is None:
+        st.info("L'index FAISS n'est pas encore disponible pour ce document.")
+
     if st.button("Générer tous les supports pédagogiques", type="primary"):
         if texte_source_disponible():
             try:
                 with st.spinner("Génération de tous les supports en cours..."):
-                    st.session_state["resume"] = generer_resume(
-                        st.session_state["texte_extrait"],
+                    st.session_state["resume"] = generer_support_pedagogique(
+                        "resume",
+                        generer_resume,
                         configuration_modele,
+                        niveau_difficulte,
                     )
-                    st.session_state["quiz"] = generer_quiz(
-                        st.session_state["texte_extrait"],
+                    st.session_state["quiz"] = generer_support_pedagogique(
+                        "quiz",
+                        generer_quiz,
                         configuration_modele,
+                        niveau_difficulte,
                     )
-                    st.session_state["flashcards"] = generer_flashcards(
-                        st.session_state["texte_extrait"],
+                    st.session_state["flashcards"] = generer_support_pedagogique(
+                        "flashcards",
+                        generer_flashcards,
                         configuration_modele,
+                        niveau_difficulte,
                     )
-                    st.session_state["questions_examen"] = generer_questions_examen(
-                        st.session_state["texte_extrait"],
+                    st.session_state["questions_examen"] = generer_support_pedagogique(
+                        "examen",
+                        generer_questions_examen,
                         configuration_modele,
+                        niveau_difficulte,
                     )
+                    st.session_state["score_qualite"] = None
                 st.success("Tous les supports pédagogiques ont été générés.")
             except Exception as erreur:
                 st.error(f"Erreur pendant la génération complète : {erreur}")
@@ -1069,58 +1267,86 @@ onglet_resume, onglet_quiz, onglet_flashcards, onglet_examen, onglet_evaluation 
 )
 
 with onglet_resume:
-    if st.button("Générer le résumé", key="bouton_resume"):
-        if texte_source_disponible():
-            try:
-                with st.spinner("Génération du résumé en cours..."):
-                    st.session_state["resume"] = generer_resume(
-                        st.session_state["texte_extrait"],
-                        configuration_modele,
-                    )
-            except Exception as erreur:
-                st.error(f"Erreur pendant la génération du résumé : {erreur}")
+    colonne_generer, colonne_exporter, _ = st.columns([1.55, 1.75, 2.2])
+    with colonne_generer:
+        if st.button("Générer le résumé", key="bouton_resume"):
+            if texte_source_disponible():
+                try:
+                    with st.spinner("Génération du résumé en cours..."):
+                        st.session_state["resume"] = generer_support_pedagogique(
+                            "resume",
+                            generer_resume,
+                            configuration_modele,
+                            niveau_difficulte,
+                        )
+                        st.session_state["score_qualite"] = None
+                except Exception as erreur:
+                    st.error(f"Erreur pendant la génération du résumé : {erreur}")
+    with colonne_exporter:
+        afficher_export_pdf("resume")
 
     afficher_contenu("Résumé généré", st.session_state["resume"])
 
 with onglet_quiz:
-    if st.button("Générer le quiz", key="bouton_quiz"):
-        if texte_source_disponible():
-            try:
-                with st.spinner("Génération du quiz en cours..."):
-                    st.session_state["quiz"] = generer_quiz(
-                        st.session_state["texte_extrait"],
-                        configuration_modele,
-                    )
-            except Exception as erreur:
-                st.error(f"Erreur pendant la génération du quiz : {erreur}")
+    colonne_generer, colonne_exporter, _ = st.columns([1.55, 1.75, 2.2])
+    with colonne_generer:
+        if st.button("Générer le quiz", key="bouton_quiz"):
+            if texte_source_disponible():
+                try:
+                    with st.spinner("Génération du quiz en cours..."):
+                        st.session_state["quiz"] = generer_support_pedagogique(
+                            "quiz",
+                            generer_quiz,
+                            configuration_modele,
+                            niveau_difficulte,
+                        )
+                        st.session_state["score_qualite"] = None
+                except Exception as erreur:
+                    st.error(f"Erreur pendant la génération du quiz : {erreur}")
+    with colonne_exporter:
+        afficher_export_pdf("quiz")
 
     afficher_contenu("Quiz généré", st.session_state["quiz"])
 
 with onglet_flashcards:
-    if st.button("Générer les flashcards", key="bouton_flashcards"):
-        if texte_source_disponible():
-            try:
-                with st.spinner("Génération des flashcards en cours..."):
-                    st.session_state["flashcards"] = generer_flashcards(
-                        st.session_state["texte_extrait"],
-                        configuration_modele,
-                    )
-            except Exception as erreur:
-                st.error(f"Erreur pendant la génération des flashcards : {erreur}")
+    colonne_generer, colonne_exporter, _ = st.columns([1.55, 1.75, 2.2])
+    with colonne_generer:
+        if st.button("Générer les flashcards", key="bouton_flashcards"):
+            if texte_source_disponible():
+                try:
+                    with st.spinner("Génération des flashcards en cours..."):
+                        st.session_state["flashcards"] = generer_support_pedagogique(
+                            "flashcards",
+                            generer_flashcards,
+                            configuration_modele,
+                            niveau_difficulte,
+                        )
+                        st.session_state["score_qualite"] = None
+                except Exception as erreur:
+                    st.error(f"Erreur pendant la génération des flashcards : {erreur}")
+    with colonne_exporter:
+        afficher_export_pdf("flashcards")
 
     afficher_contenu("Flashcards générées", st.session_state["flashcards"])
 
 with onglet_examen:
-    if st.button("Générer les questions d'examen", key="bouton_examen"):
-        if texte_source_disponible():
-            try:
-                with st.spinner("Génération des questions d'examen en cours..."):
-                    st.session_state["questions_examen"] = generer_questions_examen(
-                        st.session_state["texte_extrait"],
-                        configuration_modele,
-                    )
-            except Exception as erreur:
-                st.error(f"Erreur pendant la génération des questions d'examen : {erreur}")
+    colonne_generer, colonne_exporter, _ = st.columns([1.55, 1.75, 2.2])
+    with colonne_generer:
+        if st.button("Générer les questions d'examen", key="bouton_examen"):
+            if texte_source_disponible():
+                try:
+                    with st.spinner("Génération des questions d'examen en cours..."):
+                        st.session_state["questions_examen"] = generer_support_pedagogique(
+                            "examen",
+                            generer_questions_examen,
+                            configuration_modele,
+                            niveau_difficulte,
+                        )
+                        st.session_state["score_qualite"] = None
+                except Exception as erreur:
+                    st.error(f"Erreur pendant la génération des questions d'examen : {erreur}")
+    with colonne_exporter:
+        afficher_export_pdf("examen")
 
     afficher_contenu("Questions d'examen générées", st.session_state["questions_examen"])
 
@@ -1149,7 +1375,8 @@ with onglet_evaluation:
                 try:
                     with st.spinner("Évaluation de la qualité en cours..."):
                         score = evaluer_qualite(
-                            st.session_state["texte_extrait"],
+                            st.session_state.get("texte_nettoye")
+                            or st.session_state["texte_extrait"],
                             contenu_genere,
                         )
                         st.session_state["score_qualite"] = score
