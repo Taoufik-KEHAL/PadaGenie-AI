@@ -607,6 +607,60 @@ def _corriger_sortie_locale(
     return contenu
 
 
+def _retirer_sections_interdites_resume(contenu):
+    """Supprime les sections de questions ajoutées après un résumé."""
+    if not contenu or contenu.startswith("Erreur"):
+        return contenu
+
+    motif = re.compile(
+        r"(?im)^\s*(?:#{1,6}\s*)?(?:\*\*)?"
+        r"(?:questions?|questions?\s+de\s+compréhension(?:\s+et\s+d['’]application)?|"
+        r"exercices?|quiz)\b.*$"
+    )
+    correspondance = motif.search(contenu)
+    if correspondance:
+        contenu = contenu[: correspondance.start()].rstrip()
+
+    return contenu.strip()
+
+
+def _normaliser_conclusion_resume(contenu):
+    """Normalise le titre de conclusion et corrige les résidus Markdown."""
+    if not contenu or contenu.startswith("Erreur"):
+        return contenu
+
+    contenu = re.sub(
+        r"(?im)(\*\*)?Conclusion\s+courte(\*\*)?",
+        r"**Conclusion**",
+        contenu,
+    )
+    contenu = re.sub(r"(?im)(\*\*Conclusion\*\*)\s+courte\*\*\s*", r"\1\n\n", contenu)
+    contenu = re.sub(r"(?im)^courte\*\*\s*", "", contenu)
+    return contenu.strip()
+
+
+def _formater_sections_resume(contenu):
+    """Met les titres principaux du résumé sur une ligne dédiée."""
+    if not contenu or contenu.startswith("Erreur"):
+        return contenu
+
+    contenu = _normaliser_conclusion_resume(contenu)
+    titres = [
+        "Idée générale",
+        "Notions principales",
+        "Points essentiels",
+        "Conclusion",
+    ]
+    for titre in titres:
+        contenu = re.sub(
+            rf"(?im)^\s*(?:#{1,6}\s*)?(?:\*\*)?{re.escape(titre)}\s*:?(?:\*\*)?[ \t]+(?=\S)",
+            f"**{titre}**\n\n",
+            contenu,
+        )
+
+    return contenu.strip()
+
+
 def generer_resume(
     texte,
     configuration_modele,
@@ -625,6 +679,8 @@ Tu es un assistant pédagogique.
 À partir du contexte suivant, génère un résumé clair, structuré et adapté au niveau {niveau_difficulte}.
 N'utilise pas d'informations extérieures au contexte.
 Réponds uniquement en français.
+Ne génère aucune question, aucun quiz, aucun exercice et aucune section de compréhension.
+Arrête la réponse après la conclusion.
 
 Consignes pour le niveau {niveau_difficulte} :
 {consigne_niveau}
@@ -637,16 +693,25 @@ Format attendu :
 - Idée générale
 - Notions principales
 - Points essentiels
-- Conclusion courte
+- Conclusion
+
+Sections interdites :
+- Questions
+- Toute section de questions
+- Exercices
+- Quiz
 """
     contenu = generer_texte(prompt, configuration_modele)
-    return _corriger_sortie_locale(
+    contenu = _corriger_sortie_locale(
         contenu,
         contexte_utilisable,
         "resume",
         configuration_modele,
         niveau_difficulte,
     )
+    contenu = _retirer_sections_interdites_resume(contenu)
+    contenu = _normaliser_conclusion_resume(contenu)
+    return _formater_sections_resume(contenu)
 
 
 def generer_quiz(

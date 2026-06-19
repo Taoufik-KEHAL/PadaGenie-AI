@@ -15,7 +15,7 @@ from modules.generation import (
     generer_quiz,
     generer_resume,
 )
-from modules.nettoyage import limiter_texte, nettoyer_texte
+from modules.nettoyage import nettoyer_texte
 from modules.rag import (
     charger_modele_embedding_rag,
     construire_contexte_rag,
@@ -65,7 +65,7 @@ st.markdown(
         justify-content: center;
         font-weight: 700;
         color: #ffffff;
-        background: #ef4444;
+        background: #2563eb;
     }
 
     .quiz-question {
@@ -77,7 +77,7 @@ st.markdown(
     .quiz-extrait {
         margin-top: 0.8rem;
         padding: 0.75rem 0.85rem;
-        border-left: 3px solid #ef4444;
+        border-left: 3px solid #2563eb;
         background: rgba(148, 163, 184, 0.10);
         color: rgba(255, 255, 255, 0.86);
         line-height: 1.5;
@@ -161,6 +161,51 @@ st.markdown(
 
     .quiz-feedback-title {
         font-weight: 800;
+    }
+
+    .resume-view {
+        margin-top: 0.35rem;
+        max-width: 980px;
+    }
+
+    .resume-main-title {
+        font-size: 1.1rem;
+        font-weight: 800;
+        color: #111827;
+        margin: 0.25rem 0 1rem 0;
+        line-height: 1.45;
+    }
+
+    .resume-section {
+        margin: 1rem 0 1.1rem 0;
+        padding-left: 1rem;
+        border-left: 4px solid #2563eb;
+    }
+
+    .resume-section-title {
+        font-weight: 850;
+        color: #1f2937;
+        margin-bottom: 0.45rem;
+        line-height: 1.35;
+    }
+
+    .resume-body {
+        color: #374151;
+        line-height: 1.72;
+        font-size: 1rem;
+    }
+
+    .resume-body p {
+        margin: 0.25rem 0 0.65rem 0;
+    }
+
+    .resume-body ul {
+        margin: 0.35rem 0 0.7rem 1.2rem;
+        padding-left: 0.4rem;
+    }
+
+    .resume-body li {
+        margin-bottom: 0.35rem;
     }
 
     .flashcard-viewer {
@@ -330,6 +375,7 @@ def initialiser_session():
         "modele_embedding_rag": None,
         "index_faiss": None,
         "resume": "",
+        "resume_auto_signature": "",
         "quiz": "",
         "flashcards": "",
         "questions_examen": "",
@@ -368,6 +414,7 @@ def texte_source_disponible():
 def reinitialiser_resultats_generation():
     """Efface les contenus générés quand un nouveau document est chargé."""
     st.session_state["resume"] = ""
+    st.session_state["resume_auto_signature"] = ""
     st.session_state["quiz"] = ""
     st.session_state["flashcards"] = ""
     st.session_state["questions_examen"] = ""
@@ -426,38 +473,287 @@ def generer_support_pedagogique(type_support, fonction_generation, configuration
     )
 
 
+def configuration_generation_disponible(configuration_modele):
+    """Vérifie si le moteur choisi possède les informations nécessaires."""
+    type_modele = configuration_modele.get("type_modele")
+    if type_modele in {"OpenAI API", "Groq API"}:
+        return bool(configuration_modele.get("cle_api", "").strip())
+
+    return type_modele == "Ollama local" and bool(configuration_modele.get("nom_modele"))
+
+
+def signature_resume_automatique(configuration_modele, niveau):
+    """Construit une signature pour éviter les régénérations inutiles du résumé."""
+    texte = st.session_state.get("texte_nettoye") or st.session_state.get("texte_extrait", "")
+    empreinte_texte = hashlib.sha1(texte.encode("utf-8")).hexdigest()
+    morceaux = [
+        empreinte_texte,
+        configuration_modele.get("type_modele", ""),
+        configuration_modele.get("nom_modele", ""),
+        niveau,
+        "cle" if configuration_modele.get("cle_api", "").strip() else "sans-cle",
+    ]
+    return "|".join(morceaux)
+
+
+def generer_resume_automatique(configuration_modele, niveau):
+    """Génère le résumé automatiquement dès que le document et le modèle sont prêts."""
+    texte = st.session_state.get("texte_nettoye") or st.session_state.get("texte_extrait", "")
+    if not texte.strip() or len(texte.split()) < 20:
+        return
+
+    if not configuration_generation_disponible(configuration_modele):
+        return
+
+    signature = signature_resume_automatique(configuration_modele, niveau)
+    if st.session_state.get("resume_auto_signature") == signature:
+        return
+
+    with st.spinner("Génération automatique du résumé en cours..."):
+        st.session_state["resume"] = generer_support_pedagogique(
+            "resume",
+            generer_resume,
+            configuration_modele,
+            niveau,
+        )
+        st.session_state["score_qualite"] = None
+        st.session_state["resume_auto_signature"] = signature
+
+
 def contenu_exportable_disponible():
     """Indique si au moins un résultat peut être exporté."""
     champs = ["resume", "quiz", "flashcards", "questions_examen"]
     return any(st.session_state.get(champ, "").strip() for champ in champs)
 
 
-def afficher_export_pdf(cle_suffixe="principal"):
-    """Affiche uniquement le bouton d'export PDF."""
-    if not contenu_exportable_disponible():
+def formater_resume_affichage(contenu):
+    """Place les sections principales du résumé sur des lignes dédiées."""
+    if not contenu:
+        return ""
+
+    motif_section_interdite = re.compile(
+        r"(?im)^\s*(?:#{1,6}\s*)?(?:\*\*)?"
+        r"(?:questions?|questions?\s+de\s+compréhension(?:\s+et\s+d['’]application)?|"
+        r"exercices?|quiz)\b.*$",
+    )
+    section_interdite = motif_section_interdite.search(contenu)
+    if section_interdite:
+        contenu = contenu[: section_interdite.start()].rstrip()
+
+    contenu = re.sub(
+        r"(?im)(\*\*)?Conclusion\s+courte(\*\*)?",
+        r"**Conclusion**",
+        contenu,
+    )
+    contenu = re.sub(r"(?im)(\*\*Conclusion\*\*)\s+courte\*\*\s*", r"\1\n\n", contenu)
+    contenu = re.sub(r"(?im)^courte\*\*\s*", "", contenu)
+
+    titres = [
+        "Idée générale",
+        "Notions principales",
+        "Points essentiels",
+        "Conclusion",
+    ]
+    for titre in titres:
+        contenu = re.sub(
+            rf"(?im)^\s*(?:#{1,6}\s*)?(?:\*\*)?{re.escape(titre)}\s*:?(?:\*\*)?[ \t]+(?=\S)",
+            f"**{titre}**\n\n",
+            contenu,
+        )
+
+    return contenu.strip()
+
+
+def _inline_markdown_html(texte):
+    """Convertit un petit fragment Markdown en HTML sûr."""
+    texte = escape(str(texte).strip())
+    texte = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", texte)
+    texte = re.sub(r"`([^`]+)`", r"<code>\1</code>", texte)
+    return texte
+
+
+def _bloc_resume_html(lignes):
+    """Convertit les lignes d'une section de résumé en paragraphes et listes."""
+    blocs = []
+    liste = []
+
+    def fermer_liste():
+        nonlocal liste
+        if liste:
+            elements = "".join(f"<li>{_inline_markdown_html(item)}</li>" for item in liste)
+            blocs.append(f"<ul>{elements}</ul>")
+            liste = []
+
+    paragraphe = []
+    for ligne in lignes:
+        ligne = ligne.strip()
+        if not ligne:
+            fermer_liste()
+            if paragraphe:
+                blocs.append(f"<p>{_inline_markdown_html(' '.join(paragraphe))}</p>")
+                paragraphe = []
+            continue
+
+        element_liste = re.match(r"^[-•]\s+(.+)$", ligne)
+        if element_liste:
+            if paragraphe:
+                blocs.append(f"<p>{_inline_markdown_html(' '.join(paragraphe))}</p>")
+                paragraphe = []
+            liste.append(element_liste.group(1))
+        else:
+            fermer_liste()
+            paragraphe.append(ligne)
+
+    fermer_liste()
+    if paragraphe:
+        blocs.append(f"<p>{_inline_markdown_html(' '.join(paragraphe))}</p>")
+
+    return "".join(blocs)
+
+
+def _titre_section_resume(ligne):
+    """Détecte un titre de section dans le résumé."""
+    ligne = ligne.strip()
+    ligne = re.sub(r"^#{1,6}\s*", "", ligne).strip()
+    correspondance = re.fullmatch(r"\*\*(.+?)\*\*", ligne)
+    if correspondance:
+        return correspondance.group(1).strip(" :")
+
+    titres = [
+        "Idée générale",
+        "Notions principales",
+        "Points essentiels",
+        "Conclusion",
+    ]
+    for titre in titres:
+        if ligne.lower().strip(" :") == titre.lower():
+            return titre
+
+    return None
+
+
+def afficher_resume(contenu, afficher_titre=True):
+    """Affiche le résumé avec une mise en page structurée."""
+    if afficher_titre:
+        st.subheader("Résumé généré")
+    if not contenu:
+        st.info("Aucun contenu généré pour le moment.")
+        return
+
+    if contenu.startswith("Erreur"):
+        st.error(contenu)
+        return
+
+    contenu = formater_resume_affichage(contenu)
+    lignes = contenu.splitlines()
+    titre_principal = ""
+    sections = []
+    section_courante = None
+
+    for ligne in lignes:
+        titre_section = _titre_section_resume(ligne)
+        if titre_section:
+            if section_courante:
+                sections.append(section_courante)
+            section_courante = {"titre": titre_section, "lignes": []}
+            continue
+
+        if section_courante:
+            section_courante["lignes"].append(ligne)
+        elif ligne.strip():
+            titre_principal = ligne.strip()
+
+    if section_courante:
+        sections.append(section_courante)
+
+    html = ['<div class="resume-view">']
+    if titre_principal:
+        titre_principal = re.sub(r"^#{1,6}\s*", "", titre_principal).strip()
+        titre_principal = re.sub(r"^\*\*(.+?)\*\*$", r"\1", titre_principal).strip()
+        html.append(f'<div class="resume-main-title">{_inline_markdown_html(titre_principal)}</div>')
+
+    if sections:
+        for section in sections:
+            corps = _bloc_resume_html(section["lignes"])
+            if not corps:
+                continue
+            html.append(
+                '<section class="resume-section">'
+                f'<div class="resume-section-title">{escape(section["titre"])}</div>'
+                f'<div class="resume-body">{corps}</div>'
+                "</section>"
+            )
+    else:
+        html.append(f'<div class="resume-body">{_bloc_resume_html(lignes)}</div>')
+
+    html.append("</div>")
+    st.markdown("".join(html), unsafe_allow_html=True)
+
+
+def afficher_export_pdf(type_support):
+    """Affiche un bouton d'export PDF adapté au support courant."""
+    configurations = {
+        "resume": {
+            "champ": "resume",
+            "label": "Exporter le résumé en PDF",
+            "file_name": "resume_padagenie_ai.pdf",
+            "payload": ("resume",),
+        },
+        "quiz": {
+            "champ": "quiz",
+            "label": "Exporter le quiz en PDF",
+            "file_name": "quiz_padagenie_ai.pdf",
+            "payload": ("quiz",),
+        },
+        "flashcards": {
+            "champ": "flashcards",
+            "label": "Exporter les flashcards en PDF",
+            "file_name": "flashcards_padagenie_ai.pdf",
+            "payload": ("flashcards",),
+        },
+        "examen": {
+            "champ": "questions_examen",
+            "label": "Exporter les questions en PDF",
+            "file_name": "questions_examen_padagenie_ai.pdf",
+            "payload": ("questions_examen",),
+        },
+    }
+    configuration = configurations[type_support]
+    contenu = st.session_state.get(configuration["champ"], "")
+    if type_support == "resume":
+        contenu = formater_resume_affichage(contenu)
+
+    if not contenu.strip():
         st.download_button(
-            label="Exporter les résultats en PDF",
+            label=configuration["label"],
             data=b"",
-            file_name="resultats_padagenie_ai.pdf",
+            file_name=configuration["file_name"],
             mime="application/pdf",
             disabled=True,
-            key=f"bouton_export_pdf_desactive_{cle_suffixe}",
+            key=f"bouton_export_pdf_desactive_{type_support}",
         )
         return
 
     try:
+        donnees = {
+            "resume": "",
+            "quiz": "",
+            "flashcards": "",
+            "questions_examen": "",
+        }
+        donnees[configuration["payload"][0]] = contenu
         pdf_bytes = generer_pdf_resultats(
-            resume=st.session_state["resume"],
-            quiz=st.session_state["quiz"],
-            flashcards=st.session_state["flashcards"],
-            questions_examen=st.session_state["questions_examen"],
+            resume=donnees["resume"],
+            quiz=donnees["quiz"],
+            flashcards=donnees["flashcards"],
+            questions_examen=donnees["questions_examen"],
         )
         st.download_button(
-            label="Exporter les résultats en PDF",
+            label=configuration["label"],
             data=pdf_bytes,
-            file_name="resultats_padagenie_ai.pdf",
+            file_name=configuration["file_name"],
             mime="application/pdf",
-            key=f"bouton_export_pdf_{cle_suffixe}",
+            key=f"bouton_export_pdf_{type_support}",
         )
     except Exception as erreur:
         st.error(f"Erreur pendant la génération du PDF : {erreur}")
@@ -1200,8 +1496,6 @@ if fichier is not None:
 
             with st.spinner("Indexation RAG du document en cours..."):
                 indexer_document_rag(texte_nettoye)
-
-        st.success("Texte extrait avec succès.")
     except Exception as erreur:
         st.error(f"Erreur pendant l'extraction ou l'indexation RAG : {erreur}")
 else:
@@ -1209,17 +1503,6 @@ else:
 
 texte_extrait = st.session_state.get("texte_extrait", "")
 if texte_extrait:
-    st.write(f"Nombre approximatif de mots extraits : {len(texte_extrait.split())}")
-    st.text_area(
-        "Aperçu du texte extrait",
-        value=limiter_texte(texte_extrait, longueur_max=2000),
-        height=260,
-        disabled=True,
-    )
-
-    st.subheader("Indexation RAG du document")
-    nombre_chunks = len(st.session_state.get("chunks", []))
-    st.write(f"Nombre de chunks créés : {nombre_chunks}")
     if st.session_state.get("index_faiss") is None:
         st.info("L'index FAISS n'est pas encore disponible pour ce document.")
 
@@ -1252,9 +1535,17 @@ if texte_extrait:
                         niveau_difficulte,
                     )
                     st.session_state["score_qualite"] = None
+                    st.session_state["resume_auto_signature"] = (
+                        signature_resume_automatique(
+                            configuration_modele,
+                            niveau_difficulte,
+                        )
+                    )
                 st.success("Tous les supports pédagogiques ont été générés.")
             except Exception as erreur:
                 st.error(f"Erreur pendant la génération complète : {erreur}")
+
+    generer_resume_automatique(configuration_modele, niveau_difficulte)
 
 onglet_resume, onglet_quiz, onglet_flashcards, onglet_examen, onglet_evaluation = st.tabs(
     [
@@ -1267,25 +1558,12 @@ onglet_resume, onglet_quiz, onglet_flashcards, onglet_examen, onglet_evaluation 
 )
 
 with onglet_resume:
-    colonne_generer, colonne_exporter, _ = st.columns([1.55, 1.75, 2.2])
-    with colonne_generer:
-        if st.button("Générer le résumé", key="bouton_resume"):
-            if texte_source_disponible():
-                try:
-                    with st.spinner("Génération du résumé en cours..."):
-                        st.session_state["resume"] = generer_support_pedagogique(
-                            "resume",
-                            generer_resume,
-                            configuration_modele,
-                            niveau_difficulte,
-                        )
-                        st.session_state["score_qualite"] = None
-                except Exception as erreur:
-                    st.error(f"Erreur pendant la génération du résumé : {erreur}")
+    colonne_titre, colonne_exporter = st.columns([2.4, 1.8])
+    with colonne_titre:
+        st.subheader("Résumé généré")
     with colonne_exporter:
         afficher_export_pdf("resume")
-
-    afficher_contenu("Résumé généré", st.session_state["resume"])
+    afficher_resume(st.session_state["resume"], afficher_titre=False)
 
 with onglet_quiz:
     colonne_generer, colonne_exporter, _ = st.columns([1.55, 1.75, 2.2])
