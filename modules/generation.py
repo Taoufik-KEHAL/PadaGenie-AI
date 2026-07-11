@@ -463,39 +463,17 @@ def _generer_resume_fiable(texte, niveau_difficulte="Intermédiaire"):
 
 def _generer_quiz_fiable(texte, niveau_difficulte="Intermédiaire"):
     """Construit un QCM exploitable avec questions à trous et explications."""
-    niveau_difficulte = _normaliser_niveau_difficulte(niveau_difficulte)
-    phrases = _classer_phrases_importantes(texte, nombre=10)
-    mots_cles = _extraire_mots_cles(texte, nombre=18)
+    questions = construire_quiz_structure(texte, niveau_difficulte)
     lignes = []
 
-    for index in range(5):
-        mot_cle = mots_cles[index % len(mots_cles)]
-        phrase = _trouver_phrase_pour_mot_cle(mot_cle, phrases)
-        phrase_trouee = _remplacer_mot_cle_par_trou(phrase, mot_cle)
-        distracteurs = _choisir_distracteurs(mots_cles, mot_cle, index + 1)
-        options, bonne_etiquette = _options_qcm(mot_cle, distracteurs, index)
-
-        if niveau_difficulte == "Débutant":
-            question = "Quel terme complète correctement l'extrait suivant ?"
-            longueur_extrait = 165
-        elif niveau_difficulte == "Avancé":
-            question = (
-                "Quelle notion complète l'extrait et permet d'en interpréter le rôle "
-                "dans le document ?"
-            )
-            longueur_extrait = 210
-        else:
-            question = "Quelle réponse complète correctement l'extrait suivant ?"
-            longueur_extrait = 180
-
-        lignes.append(f"{index + 1}. {question}")
-        lignes.append(f"   « {_raccourcir(phrase_trouee, longueur_extrait)} »")
-        for etiquette, option in options:
-            lignes.append(f"   {etiquette}. {_formater_option(option)}")
-        lignes.append(f"   Réponse correcte : {bonne_etiquette}")
-        lignes.append(
-            f"   Explication : niveau {niveau_difficulte} - {_raccourcir(phrase, 230)}"
-        )
+    for item in questions:
+        lignes.append(f"{item['numero']}. {item['question']}")
+        if item.get("extrait"):
+            lignes.append(f"   « {item['extrait']} »")
+        for etiquette, option in item["options"]:
+            lignes.append(f"   {etiquette}. {option}")
+        lignes.append(f"   Réponse correcte : {item['reponse']}")
+        lignes.append(f"   Explication : {item['explication']}")
         lignes.append("")
 
     return "\n".join(lignes).strip()
@@ -503,31 +481,15 @@ def _generer_quiz_fiable(texte, niveau_difficulte="Intermédiaire"):
 
 def _generer_flashcards_fiables(texte, niveau_difficulte="Intermédiaire"):
     """Construit des flashcards centrées sur les notions importantes."""
-    niveau_difficulte = _normaliser_niveau_difficulte(niveau_difficulte)
-    phrases = _classer_phrases_importantes(texte, nombre=10)
-    mots_cles = _extraire_mots_cles(texte, nombre=10)
+    flashcards = construire_flashcards_structure(texte, niveau_difficulte)
     lignes = []
 
-    for index, mot_cle in enumerate(mots_cles[:5]):
-        phrase = _trouver_phrase_pour_mot_cle(mot_cle, phrases)
-        if niveau_difficulte == "Débutant":
-            question = f"Que signifie simplement « {_formater_option(mot_cle)} » ?"
-            longueur_reponse = 190
-        elif niveau_difficulte == "Avancé":
-            question = (
-                f"Quel rôle joue « {_formater_option(mot_cle)} » dans le raisonnement "
-                "du document ?"
-            )
-            longueur_reponse = 260
-        else:
-            question = f"Que faut-il retenir sur « {_formater_option(mot_cle)} » ?"
-            longueur_reponse = 230
-
+    for item in flashcards:
         lignes.extend(
             [
-                f"### Flashcard {index + 1}",
-                f"**Question :** {question}",
-                f"**Réponse :** {_raccourcir(phrase, longueur_reponse)}",
+                f"### Flashcard {item['numero']}",
+                f"**Question :** {item['question']}",
+                f"**Réponse :** {item['reponse']}",
                 "",
             ]
         )
@@ -575,6 +537,123 @@ def _generer_questions_examen_fiables(texte, niveau_difficulte="Intermédiaire")
         lignes.append(f"{index + 1}. {modele_question.format(mot=_formater_option(mot_cle))}")
         lignes.append(f"   Éléments attendus : {_raccourcir(phrase, longueur_elements)}")
         lignes.append("")
+
+    return "\n".join(lignes).strip()
+
+
+def construire_quiz_structure(texte, niveau_difficulte="Intermédiaire", nombre_questions=5):
+    """Construit des questions QCM structurées à partir du document."""
+    texte_utilisable, erreur = _preparer_texte(texte)
+    if erreur:
+        return []
+
+    niveau_difficulte = _normaliser_niveau_difficulte(niveau_difficulte)
+    phrases = _classer_phrases_importantes(texte_utilisable, nombre=10)
+    mots_cles = _extraire_mots_cles(texte_utilisable, nombre=18)
+    questions = []
+
+    for index in range(nombre_questions):
+        mot_cle = mots_cles[index % len(mots_cles)]
+        phrase = _trouver_phrase_pour_mot_cle(mot_cle, phrases)
+        phrase_trouee = _remplacer_mot_cle_par_trou(phrase, mot_cle)
+        distracteurs = _choisir_distracteurs(mots_cles, mot_cle, index + 1)
+        options, bonne_etiquette = _options_qcm(
+            _formater_option(mot_cle),
+            [_formater_option(distracteur) for distracteur in distracteurs],
+            index,
+        )
+
+        if niveau_difficulte == "Débutant":
+            question = "Quel terme complète correctement l'extrait suivant ?"
+            longueur_extrait = 165
+        elif niveau_difficulte == "Avancé":
+            question = (
+                "Quelle notion complète l'extrait et permet d'en interpréter le rôle "
+                "dans le document ?"
+            )
+            longueur_extrait = 210
+        else:
+            question = "Quelle réponse complète correctement l'extrait suivant ?"
+            longueur_extrait = 180
+
+        questions.append(
+            {
+                "numero": str(index + 1),
+                "question": question,
+                "extrait": _raccourcir(phrase_trouee, longueur_extrait),
+                "options": options,
+                "reponse": bonne_etiquette,
+                "explication": _raccourcir(phrase, 230),
+            }
+        )
+
+    return questions
+
+
+def formater_quiz_structure(questions):
+    """Transforme une structure QCM en texte exportable."""
+    lignes = []
+    for item in questions:
+        lignes.append(f"{item['numero']}. {item['question']}")
+        if item.get("extrait"):
+            lignes.append(f"   « {item['extrait']} »")
+        for etiquette, option in item.get("options", []):
+            lignes.append(f"   {etiquette}. {option}")
+        lignes.append(f"   Réponse correcte : {item.get('reponse', '')}")
+        if item.get("explication"):
+            lignes.append(f"   Explication : {item['explication']}")
+        lignes.append("")
+
+    return "\n".join(lignes).strip()
+
+
+def construire_flashcards_structure(texte, niveau_difficulte="Intermédiaire", nombre_flashcards=5):
+    """Construit des flashcards structurées à partir du document."""
+    texte_utilisable, erreur = _preparer_texte(texte)
+    if erreur:
+        return []
+
+    niveau_difficulte = _normaliser_niveau_difficulte(niveau_difficulte)
+    phrases = _classer_phrases_importantes(texte_utilisable, nombre=10)
+    mots_cles = _extraire_mots_cles(texte_utilisable, nombre=10)
+    flashcards = []
+
+    for index, mot_cle in enumerate(mots_cles[:nombre_flashcards]):
+        phrase = _trouver_phrase_pour_mot_cle(mot_cle, phrases)
+        notion = _formater_option(mot_cle)
+        if niveau_difficulte == "Débutant":
+            question = f"Que signifie simplement « {notion} » ?"
+            longueur_reponse = 190
+        elif niveau_difficulte == "Avancé":
+            question = f"Quel rôle joue « {notion} » dans le raisonnement du document ?"
+            longueur_reponse = 260
+        else:
+            question = f"Que faut-il retenir sur « {notion} » ?"
+            longueur_reponse = 230
+
+        flashcards.append(
+            {
+                "numero": str(index + 1),
+                "question": question,
+                "reponse": _raccourcir(phrase, longueur_reponse),
+            }
+        )
+
+    return flashcards
+
+
+def formater_flashcards_structure(flashcards):
+    """Transforme une structure de flashcards en texte exportable."""
+    lignes = []
+    for item in flashcards:
+        lignes.extend(
+            [
+                f"### Flashcard {item['numero']}",
+                f"**Question :** {item['question']}",
+                f"**Réponse :** {item['reponse']}",
+                "",
+            ]
+        )
 
     return "\n".join(lignes).strip()
 

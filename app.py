@@ -5,14 +5,17 @@ import re
 from html import escape
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from modules.evaluation import evaluer_qualite, interpreter_score
 from modules.export_pdf import generer_pdf_resultats
 from modules.extraction import extraire_texte
 from modules.generation import (
-    generer_flashcards,
+    construire_flashcards_structure,
+    construire_quiz_structure,
+    formater_flashcards_structure,
+    formater_quiz_structure,
     generer_questions_examen,
-    generer_quiz,
     generer_resume,
 )
 from modules.nettoyage import nettoyer_texte
@@ -42,12 +45,18 @@ st.set_page_config(
 st.markdown(
     """
     <style>
+    .quiz-shell {
+        max-width: 980px;
+        margin-top: 0.7rem;
+    }
+
     .quiz-card {
-        border: 1px solid rgba(148, 163, 184, 0.28);
+        border: 1px solid #dbeafe;
         border-radius: 8px;
-        padding: 1rem;
+        padding: 1.05rem;
         margin: 0 0 1rem 0;
-        background: rgba(15, 23, 42, 0.32);
+        background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+        box-shadow: 0 16px 34px rgba(15, 23, 42, 0.07);
     }
 
     .quiz-question-row {
@@ -66,20 +75,23 @@ st.markdown(
         font-weight: 700;
         color: #ffffff;
         background: #2563eb;
+        box-shadow: 0 8px 16px rgba(37, 99, 235, 0.18);
     }
 
     .quiz-question {
         font-weight: 700;
         line-height: 1.45;
         padding-top: 0.2rem;
+        color: #111827;
     }
 
     .quiz-extrait {
         margin-top: 0.8rem;
         padding: 0.75rem 0.85rem;
         border-left: 3px solid #2563eb;
-        background: rgba(148, 163, 184, 0.10);
-        color: rgba(255, 255, 255, 0.86);
+        border-radius: 0 8px 8px 0;
+        background: #eff6ff;
+        color: #1e3a8a;
         line-height: 1.5;
     }
 
@@ -93,16 +105,29 @@ st.markdown(
         display: flex;
         gap: 0.7rem;
         align-items: flex-start;
-        border: 1px solid rgba(148, 163, 184, 0.25);
+        border: 1px solid #e5e7eb;
         border-radius: 8px;
         padding: 0.7rem 0.8rem;
-        background: rgba(2, 6, 23, 0.26);
+        background: #ffffff;
         line-height: 1.4;
+        color: #374151;
+        transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+    }
+
+    .quiz-option-selected {
+        border-color: #93c5fd;
+        background: #eff6ff;
+        box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.10);
     }
 
     .quiz-option-correct {
-        border-color: rgba(34, 197, 94, 0.7);
-        background: rgba(34, 197, 94, 0.13);
+        border-color: #86efac;
+        background: #f0fdf4;
+    }
+
+    .quiz-option-wrong {
+        border-color: #fecaca;
+        background: #fef2f2;
     }
 
     .quiz-label {
@@ -113,8 +138,8 @@ st.markdown(
         align-items: center;
         justify-content: center;
         font-weight: 800;
-        background: rgba(148, 163, 184, 0.18);
-        color: #f8fafc;
+        background: #eef2ff;
+        color: #3730a3;
     }
 
     .quiz-option-correct .quiz-label {
@@ -122,15 +147,24 @@ st.markdown(
         color: #052e16;
     }
 
+    .quiz-option-wrong .quiz-label {
+        background: #ef4444;
+        color: #ffffff;
+    }
+
+    .quiz-option-text {
+        padding-top: 0.1rem;
+    }
+
     .quiz-answer {
         margin-top: 0.85rem;
         font-weight: 700;
-        color: #86efac;
+        color: #166534;
     }
 
     .quiz-explanation {
         margin-top: 0.45rem;
-        color: rgba(255, 255, 255, 0.78);
+        color: #4b5563;
         line-height: 1.45;
     }
 
@@ -209,11 +243,14 @@ st.markdown(
     }
 
     .flashcard-viewer {
-        border: 1px solid rgba(148, 163, 184, 0.30);
+        border: 1px solid #dcfce7;
         border-radius: 8px;
-        padding: 1.25rem;
+        padding: 1.3rem;
         margin: 0.8rem 0 1rem 0;
-        background: linear-gradient(135deg, rgba(15, 23, 42, 0.90), rgba(39, 39, 42, 0.82));
+        background:
+            linear-gradient(135deg, rgba(240, 253, 244, 0.96), rgba(255, 255, 255, 0.98)),
+            #ffffff;
+        box-shadow: 0 16px 34px rgba(20, 83, 45, 0.08);
     }
 
     .flashcard-topline {
@@ -232,18 +269,19 @@ st.markdown(
         height: 2.2rem;
         border-radius: 999px;
         font-weight: 800;
-        color: #052e16;
-        background: #86efac;
+        color: #ffffff;
+        background: #16a34a;
+        box-shadow: 0 8px 16px rgba(22, 163, 74, 0.18);
     }
 
     .flashcard-theme {
-        color: rgba(255, 255, 255, 0.68);
+        color: #64748b;
         font-size: 0.9rem;
         text-align: right;
     }
 
     .flashcard-label {
-        color: #86efac;
+        color: #15803d;
         font-size: 0.85rem;
         font-weight: 800;
         text-transform: uppercase;
@@ -254,34 +292,35 @@ st.markdown(
         font-size: 1.2rem;
         font-weight: 750;
         line-height: 1.45;
-        color: #f8fafc;
+        color: #111827;
     }
 
     .flashcard-answer {
         margin-top: 1rem;
         padding: 0.95rem 1rem;
-        border-left: 3px solid #86efac;
+        border-left: 3px solid #16a34a;
         border-radius: 0 8px 8px 0;
-        background: rgba(34, 197, 94, 0.11);
+        background: #f0fdf4;
         line-height: 1.55;
-        color: rgba(255, 255, 255, 0.90);
+        color: #14532d;
     }
 
     .flashcard-hidden {
         margin-top: 1rem;
         padding: 0.95rem 1rem;
-        border: 1px dashed rgba(148, 163, 184, 0.45);
+        border: 1px dashed #94a3b8;
         border-radius: 8px;
-        color: rgba(255, 255, 255, 0.58);
-        background: rgba(15, 23, 42, 0.35);
+        color: #64748b;
+        background: #f8fafc;
     }
 
     .flashcard-mini {
-        border: 1px solid rgba(148, 163, 184, 0.25);
+        border: 1px solid #e5e7eb;
         border-radius: 8px;
         padding: 0.85rem;
         margin-bottom: 0.75rem;
-        background: rgba(2, 6, 23, 0.20);
+        background: #ffffff;
+        color: #374151;
     }
 
     .exam-viewer {
@@ -365,6 +404,95 @@ st.markdown(
 )
 
 
+def injecter_rendu_latex():
+    """Active le rendu des formules LaTeX (\\(...\\), \\[...\\], $...$, $$...$$)."""
+    components.html(
+        """
+        <script>
+        (function () {
+            var doc = window.parent.document;
+
+            function chargerKatex(callback) {
+                if (doc.__katexPret) {
+                    callback();
+                    return;
+                }
+                if (doc.__katexChargement) {
+                    doc.__katexCallbacks.push(callback);
+                    return;
+                }
+                doc.__katexChargement = true;
+                doc.__katexCallbacks = [callback];
+
+                var feuille = doc.createElement("link");
+                feuille.rel = "stylesheet";
+                feuille.href = "https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css";
+                doc.head.appendChild(feuille);
+
+                var script = doc.createElement("script");
+                script.src = "https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js";
+                script.onload = function () {
+                    var autoRender = doc.createElement("script");
+                    autoRender.src =
+                        "https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js";
+                    autoRender.onload = function () {
+                        doc.__katexPret = true;
+                        doc.__katexCallbacks.forEach(function (fn) {
+                            fn();
+                        });
+                        doc.__katexCallbacks = [];
+                    };
+                    doc.head.appendChild(autoRender);
+                };
+                doc.head.appendChild(script);
+            }
+
+            function rendreFormules() {
+                if (!doc.__katexPret || !window.parent.renderMathInElement) {
+                    return;
+                }
+                try {
+                    window.parent.renderMathInElement(doc.body, {
+                        delimiters: [
+                            { left: "$$", right: "$$", display: true },
+                            { left: "\\\\[", right: "\\\\]", display: true },
+                            { left: "\\\\(", right: "\\\\)", display: false },
+                            { left: "$", right: "$", display: false }
+                        ],
+                        throwOnError: false,
+                        ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code"]
+                    });
+                } catch (erreur) {
+                    /* Ignore les formules mal formées. */
+                }
+            }
+
+            chargerKatex(function () {
+                rendreFormules();
+                if (!doc.__katexObserver) {
+                    var minuteur = null;
+                    var observateur = new MutationObserver(function () {
+                        clearTimeout(minuteur);
+                        minuteur = setTimeout(rendreFormules, 250);
+                    });
+                    observateur.observe(doc.body, {
+                        childList: true,
+                        subtree: true,
+                        characterData: true,
+                    });
+                    doc.__katexObserver = observateur;
+                }
+            });
+        })();
+        </script>
+        """,
+        height=0,
+    )
+
+
+injecter_rendu_latex()
+
+
 def initialiser_session():
     """Initialise les données conservées pendant l'utilisation de l'application."""
     valeurs_defaut = {
@@ -377,7 +505,9 @@ def initialiser_session():
         "resume": "",
         "resume_auto_signature": "",
         "quiz": "",
+        "quiz_structure": [],
         "flashcards": "",
+        "flashcards_structure": [],
         "questions_examen": "",
         "score_qualite": None,
         "quiz_signature": "",
@@ -416,7 +546,9 @@ def reinitialiser_resultats_generation():
     st.session_state["resume"] = ""
     st.session_state["resume_auto_signature"] = ""
     st.session_state["quiz"] = ""
+    st.session_state["quiz_structure"] = []
     st.session_state["flashcards"] = ""
+    st.session_state["flashcards_structure"] = []
     st.session_state["questions_examen"] = ""
     st.session_state["score_qualite"] = None
     reinitialiser_quiz_interactif()
@@ -471,6 +603,31 @@ def generer_support_pedagogique(type_support, fonction_generation, configuration
         contexte_rag=contexte_rag,
         niveau_difficulte=niveau,
     )
+
+
+def texte_structure_pour_tache(type_support):
+    """Retourne le contexte RAG de la tâche ou le texte nettoyé."""
+    texte_nettoye = st.session_state.get("texte_nettoye") or st.session_state["texte_extrait"]
+    contexte_rag = contexte_rag_pour_tache(type_support)
+    return contexte_rag or texte_nettoye
+
+
+def generer_quiz_structure_independante(niveau):
+    """Génère un quiz structuré sans dépendre du format de réponse du modèle."""
+    source = texte_structure_pour_tache("quiz")
+    questions = construire_quiz_structure(source, niveau)
+    st.session_state["quiz_structure"] = questions
+    st.session_state["quiz"] = formater_quiz_structure(questions)
+    st.session_state["score_qualite"] = None
+
+
+def generer_flashcards_structure_independante(niveau):
+    """Génère des flashcards structurées sans dépendre du format de réponse du modèle."""
+    source = texte_structure_pour_tache("flashcards")
+    flashcards = construire_flashcards_structure(source, niveau)
+    st.session_state["flashcards_structure"] = flashcards
+    st.session_state["flashcards"] = formater_flashcards_structure(flashcards)
+    st.session_state["score_qualite"] = None
 
 
 def configuration_generation_disponible(configuration_modele):
@@ -806,6 +963,9 @@ def reinitialiser_quiz_interactif():
     st.session_state["quiz_index"] = 0
     st.session_state["quiz_valide"] = False
     st.session_state["quiz_reponses"] = {}
+    for cle in list(st.session_state.keys()):
+        if str(cle).startswith("quiz_choix_"):
+            del st.session_state[cle]
 
 
 def reinitialiser_flashcards():
@@ -823,7 +983,19 @@ def reinitialiser_questions_examen():
 def _normaliser_quiz(contenu):
     """Ajoute des retours à la ligne autour des éléments QCM."""
     contenu = contenu.replace("\r\n", "\n").replace("\r", "\n")
-    contenu = re.sub(r"\s+(?=[A-D]\.\s)", "\n", contenu)
+    contenu = re.sub(r"(?m)^\s*\*\*\s*(\d+[\.)]\s+)", r"\1", contenu)
+    contenu = re.sub(r"(?m)^\s*\*\*\s*([A-D][\.)]\s+)", r"\1", contenu)
+    contenu = re.sub(
+        r"(?im)^\s*\*\*\s*(Réponse correcte|Explication)\s*:\s*\*\*",
+        r"\1 :",
+        contenu,
+    )
+    contenu = re.sub(
+        r"(?im)^\s*\*\*\s*(Réponse correcte|Explication)\s*:",
+        r"\1 :",
+        contenu,
+    )
+    contenu = re.sub(r"\s+(?=[A-D][\.)]\s)", "\n", contenu)
     contenu = re.sub(r"\s+(?=Réponse correcte\s*:)", "\n", contenu, flags=re.IGNORECASE)
     contenu = re.sub(r"\s+(?=Explication\s*:)", "\n", contenu, flags=re.IGNORECASE)
     contenu = re.sub(r"\n{3,}", "\n\n", contenu)
@@ -838,6 +1010,7 @@ def _nettoyer_option_quiz(texte):
         maxsplit=1,
         flags=re.IGNORECASE,
     )[0]
+    texte = re.sub(r"\*\*(.*?)\*\*", r"\1", texte)
     texte = re.sub(r"\s+", " ", texte)
     return texte.strip(" -\n\t")
 
@@ -855,7 +1028,10 @@ def _libelle_bonne_reponse(options, reponse):
 def _analyser_quiz(contenu):
     """Transforme le texte du quiz en questions structurées pour l'affichage."""
     contenu = _normaliser_quiz(contenu)
-    blocs = re.split(r"(?m)^\s*(?=\d+\.\s+)", contenu)
+    motif_debut_question = (
+        r"(?m)^\s*(?=(?:\*\*)?(?:Question\s*)?\d+[\.)]\s+)"
+    )
+    blocs = re.split(motif_debut_question, contenu)
     questions = []
 
     for bloc in blocs:
@@ -863,14 +1039,18 @@ def _analyser_quiz(contenu):
         if not bloc:
             continue
 
-        correspondance = re.match(r"(?s)^(\d+)\.\s*(.+)$", bloc)
+        correspondance = re.match(
+            r"(?s)^(?:\*\*)?(?:Question\s*)?(\d+)[\.)]\s*(.+)$",
+            bloc,
+            flags=re.IGNORECASE,
+        )
         if not correspondance:
             continue
 
         numero = correspondance.group(1)
         reste = correspondance.group(2).strip()
         avant_options = re.split(
-            r"(?m)^\s*[A-D]\.\s+|^\s*Réponse correcte\s*:|^\s*Explication\s*:",
+            r"(?m)^\s*(?:\*\*)?[A-D][\.)]\s+|^\s*(?:\*\*)?Réponse correcte\s*:|^\s*(?:\*\*)?Explication\s*:",
             reste,
             maxsplit=1,
         )[0].strip()
@@ -884,8 +1064,9 @@ def _analyser_quiz(contenu):
             question = avant_options
 
         question = re.sub(r"\s+", " ", question).strip()
+        question = re.sub(r"^\*\*|\*\*$", "", question).strip()
         options = re.findall(
-            r"(?ms)^\s*([A-D])\.\s*(.+?)(?=^\s*[A-D]\.\s+|^\s*Réponse correcte\s*:|^\s*Explication\s*:|\Z)",
+            r"(?ms)^\s*(?:\*\*)?([A-D])[\.)]\s*(.+?)(?=^\s*(?:\*\*)?[A-D][\.)]\s+|^\s*(?:\*\*)?Réponse correcte\s*:|^\s*(?:\*\*)?Explication\s*:|\Z)",
             bloc,
         )
         options = [
@@ -894,19 +1075,20 @@ def _analyser_quiz(contenu):
         ]
 
         reponse_trouvee = re.search(
-            r"Réponse correcte\s*:\s*([A-D])",
+            r"(?:\*\*)?Réponse correcte\s*:\s*([A-D])",
             bloc,
             flags=re.IGNORECASE,
         )
         reponse = reponse_trouvee.group(1).upper() if reponse_trouvee else ""
 
         explication_trouvee = re.search(
-            r"(?is)Explication\s*:\s*(.+)$",
+            r"(?is)(?:\*\*)?Explication\s*:\s*(.+)$",
             bloc,
         )
         explication = ""
         if explication_trouvee:
             explication = re.sub(r"\s+", " ", explication_trouvee.group(1)).strip()
+            explication = re.sub(r"^\*\*|\*\*$", "", explication).strip()
 
         if question and len(options) >= 2:
             questions.append(
@@ -923,14 +1105,49 @@ def _analyser_quiz(contenu):
     return questions
 
 
+def _questions_quiz_pour_affichage(contenu):
+    """Retourne les questions structurées disponibles pour le quiz."""
+    questions = st.session_state.get("quiz_structure") or []
+    if questions:
+        return questions
+
+    return _analyser_quiz(contenu)
+
+
+def _options_quiz_html(question, choix, afficher_correction):
+    """Construit les cartes HTML des options QCM."""
+    elements = []
+    bonne_reponse = question.get("reponse", "")
+
+    for etiquette, valeur in question.get("options", []):
+        classes = ["quiz-option"]
+        if etiquette == choix:
+            classes.append("quiz-option-selected")
+        if afficher_correction and etiquette == bonne_reponse:
+            classes.append("quiz-option-correct")
+        elif afficher_correction and etiquette == choix and choix != bonne_reponse:
+            classes.append("quiz-option-wrong")
+
+        elements.append(
+            (
+                f'<div class="{" ".join(classes)}">'
+                f'<span class="quiz-label">{escape(etiquette)}</span>'
+                f'<span class="quiz-option-text">{escape(valeur)}</span>'
+                "</div>"
+            )
+        )
+
+    return '<div class="quiz-options">' + "".join(elements) + "</div>"
+
+
 def afficher_quiz(contenu):
     """Affiche le quiz sous forme interactive."""
-    questions = _analyser_quiz(contenu)
+    questions = _questions_quiz_pour_affichage(contenu)
     if not questions:
-        st.markdown(contenu)
+        st.warning("Le quiz structuré n'est pas disponible pour ce document.")
         return
 
-    signature = hashlib.sha1(contenu.encode("utf-8")).hexdigest()
+    signature = hashlib.sha1(repr(questions).encode("utf-8")).hexdigest()
     if st.session_state.get("quiz_signature") != signature:
         st.session_state["quiz_signature"] = signature
         reinitialiser_quiz_interactif()
@@ -967,41 +1184,38 @@ def afficher_quiz(contenu):
     cle_question = str(index)
     reponses = st.session_state.get("quiz_reponses", {})
     choix_deja_fait = reponses.get(cle_question)
+    cle_widget = f"quiz_choix_{signature}_{index}"
+    choix_en_cours = st.session_state.get(cle_widget, choix_deja_fait)
 
     st.progress((index + 1) / total_questions)
     st.caption(f"Question {index + 1} sur {total_questions}")
 
+    extrait_html = ""
+    if question["extrait"]:
+        extrait_html = f'<div class="quiz-extrait">« {escape(question["extrait"])} »</div>'
+
     st.markdown(
         (
+            '<div class="quiz-shell">'
             '<div class="quiz-card">'
             '<div class="quiz-question-row">'
             f'<span class="quiz-number">{escape(str(index + 1))}</span>'
             f'<div class="quiz-question">{escape(question["question"])}</div>'
+            "</div>"
+            f"{extrait_html}"
+            f'{_options_quiz_html(question, choix_en_cours, st.session_state["quiz_valide"])}'
             "</div>"
             "</div>"
         ),
         unsafe_allow_html=True,
     )
 
-    if question["extrait"]:
-        st.markdown(
-            f'<div class="quiz-extrait">« {escape(question["extrait"])} »</div>',
-            unsafe_allow_html=True,
-        )
-
     options = [etiquette for etiquette, _ in question["options"]]
-    libelles_options = {
-        etiquette: f"{etiquette}. {valeur}"
-        for etiquette, valeur in question["options"]
-    }
-
-    index_selection = options.index(choix_deja_fait) if choix_deja_fait in options else None
-    choix = st.radio(
-        "Choisissez une réponse",
+    choix = st.segmented_control(
+        "Votre réponse",
         options,
-        index=index_selection,
-        format_func=lambda etiquette: libelles_options[etiquette],
-        key=f"quiz_choix_{signature}_{index}",
+        default=choix_deja_fait if choix_deja_fait in options else None,
+        key=cle_widget,
         disabled=st.session_state["quiz_valide"],
     )
 
@@ -1167,6 +1381,15 @@ def _analyser_flashcards(contenu):
     return flashcards
 
 
+def _flashcards_pour_affichage(contenu):
+    """Retourne les flashcards structurées disponibles."""
+    flashcards = st.session_state.get("flashcards_structure") or []
+    if flashcards:
+        return flashcards
+
+    return _analyser_flashcards(contenu)
+
+
 def _extraire_theme_flashcard(question):
     """Retourne un thème court à partir de la question."""
     theme = re.search(r"«\s*(.+?)\s*»", question)
@@ -1179,12 +1402,12 @@ def _extraire_theme_flashcard(question):
 
 def afficher_flashcards(contenu):
     """Affiche les flashcards en mode révision interactif."""
-    flashcards = _analyser_flashcards(contenu)
+    flashcards = _flashcards_pour_affichage(contenu)
     if not flashcards:
-        st.markdown(contenu)
+        st.warning("Les flashcards structurées ne sont pas disponibles pour ce document.")
         return
 
-    signature = hashlib.sha1(contenu.encode("utf-8")).hexdigest()
+    signature = hashlib.sha1(repr(flashcards).encode("utf-8")).hexdigest()
     if st.session_state.get("flashcards_signature") != signature:
         st.session_state["flashcards_signature"] = signature
         reinitialiser_flashcards()
@@ -1491,6 +1714,7 @@ with st.sidebar:
         ["Débutant", "Intermédiaire", "Avancé"],
         index=1,
     )
+    st.session_state["niveau_difficulte"] = niveau_difficulte
 
 configuration_modele = {
     "type_modele": type_modele,
@@ -1544,18 +1768,8 @@ if texte_extrait:
                         configuration_modele,
                         niveau_difficulte,
                     )
-                    st.session_state["quiz"] = generer_support_pedagogique(
-                        "quiz",
-                        generer_quiz,
-                        configuration_modele,
-                        niveau_difficulte,
-                    )
-                    st.session_state["flashcards"] = generer_support_pedagogique(
-                        "flashcards",
-                        generer_flashcards,
-                        configuration_modele,
-                        niveau_difficulte,
-                    )
+                    generer_quiz_structure_independante(niveau_difficulte)
+                    generer_flashcards_structure_independante(niveau_difficulte)
                     st.session_state["questions_examen"] = generer_support_pedagogique(
                         "examen",
                         generer_questions_examen,
@@ -1597,16 +1811,10 @@ with onglet_quiz:
     colonne_generer, colonne_exporter, _ = st.columns([1.55, 1.75, 2.2])
     with colonne_generer:
         if st.button("Générer le quiz", key="bouton_quiz"):
-            if texte_source_disponible() and generation_autorisee(configuration_modele):
+            if texte_source_disponible():
                 try:
                     with st.spinner("Génération du quiz en cours..."):
-                        st.session_state["quiz"] = generer_support_pedagogique(
-                            "quiz",
-                            generer_quiz,
-                            configuration_modele,
-                            niveau_difficulte,
-                        )
-                        st.session_state["score_qualite"] = None
+                        generer_quiz_structure_independante(niveau_difficulte)
                 except Exception as erreur:
                     st.error(f"Erreur pendant la génération du quiz : {erreur}")
     with colonne_exporter:
@@ -1618,16 +1826,10 @@ with onglet_flashcards:
     colonne_generer, colonne_exporter, _ = st.columns([1.55, 1.75, 2.2])
     with colonne_generer:
         if st.button("Générer les flashcards", key="bouton_flashcards"):
-            if texte_source_disponible() and generation_autorisee(configuration_modele):
+            if texte_source_disponible():
                 try:
                     with st.spinner("Génération des flashcards en cours..."):
-                        st.session_state["flashcards"] = generer_support_pedagogique(
-                            "flashcards",
-                            generer_flashcards,
-                            configuration_modele,
-                            niveau_difficulte,
-                        )
-                        st.session_state["score_qualite"] = None
+                        generer_flashcards_structure_independante(niveau_difficulte)
                 except Exception as erreur:
                     st.error(f"Erreur pendant la génération des flashcards : {erreur}")
     with colonne_exporter:
